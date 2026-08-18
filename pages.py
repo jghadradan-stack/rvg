@@ -370,6 +370,34 @@ a{color:inherit;text-decoration:none}
 .srv-tile-val{font-size:12px;font-weight:700;color:var(--t1);word-break:break-word}
 
 /* ══════ پنل تغییر رمز ══════ */
+/* ===== changelog / تغییرات ===== */
+.chg-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:linear-gradient(135deg,var(--bg3) 0%,var(--card) 70%);border:1px solid var(--card-b);border-radius:22px;padding:18px 20px;box-shadow:var(--shadow);margin-bottom:18px}
+.chg-head-icon{width:48px;height:48px;border-radius:14px;background:var(--accent-d);color:var(--accent2);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0}
+.chg-head-title{font-size:15px;font-weight:800;color:var(--t1)}
+.chg-head-sub{font-size:11.5px;color:var(--t3);margin-top:3px}
+.chg-head-ver{margin-right:auto;background:var(--accent);color:#fff;font-size:12px;font-weight:800;padding:7px 14px;border-radius:12px;box-shadow:0 4px 14px rgba(59,130,246,.35)}
+.chg-filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.chg-fil{padding:6px 13px;border-radius:9px;font-size:10.5px;font-weight:700;color:var(--t3);cursor:pointer;border:1px solid var(--card-b);background:var(--accent-d);font-family:inherit;transition:.15s}
+.chg-fil.on{background:var(--accent);color:#fff;border-color:transparent}
+.chg-tl{position:relative;padding-right:22px}
+.chg-tl:before{content:"";position:absolute;right:6px;top:8px;bottom:8px;width:2px;background:var(--card-b);border-radius:2px}
+.chg-item{position:relative;margin-bottom:16px}
+.chg-dot{position:absolute;right:-22px;top:20px;width:14px;height:14px;border-radius:50%;background:var(--bg2);border:3px solid var(--card-b)}
+.chg-item.latest .chg-dot{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-d)}
+.chg-card{background:var(--card);border:1px solid var(--card-b);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow)}
+.chg-item.latest .chg-card{border-color:var(--accent)}
+.chg-card-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.chg-ver{font-size:13.5px;font-weight:800;color:var(--t1)}
+.chg-date{font-size:10.5px;color:var(--t3)}
+.chg-new{background:rgba(34,197,94,.15);color:#22c55e;font-size:9px;font-weight:800;padding:2px 8px;border-radius:20px}
+.chg-title{font-size:11.5px;color:var(--t2);margin-bottom:10px}
+.chg-list{list-style:none;display:flex;flex-direction:column;gap:7px}
+.chg-li{display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--t2);line-height:1.75}
+.chg-li i{font-size:14px;margin-top:3px;flex-shrink:0}
+.chg-tag{font-size:9px;font-weight:800;padding:2px 7px;border-radius:6px;flex-shrink:0;margin-top:2px}
+.tg-new{background:rgba(59,130,246,.15);color:var(--accent2)}
+.tg-imp{background:rgba(168,85,247,.15);color:#a855f7}
+.tg-fix{background:rgba(245,158,11,.15);color:#f59e0b}
 .pw-panel{background:linear-gradient(155deg,var(--bg3) 0%,var(--card) 60%);border:1px solid var(--card-b);border-radius:22px;overflow:hidden;box-shadow:var(--shadow);position:relative}
 .pw-panel::before{content:'';position:absolute;top:-60px;right:-60px;width:200px;height:200px;background:radial-gradient(circle,var(--purple-bg),transparent 70%);pointer-events:none}
 .pw-hero{display:flex;align-items:center;gap:14px;padding:22px 24px 18px;position:relative;z-index:1}
@@ -823,6 +851,7 @@ a{color:inherit;text-decoration:none}
     <div class="nav-it" data-pg="logs"><i class="ti ti-history"></i> لاگ فعالیت‌ها</div>
     <div class="nav-it" data-pg="errors"><i class="ti ti-alert-triangle"></i> خطاها</div>
     <div class="nav-it" data-pg="testws"><i class="ti ti-wifi"></i> تست WebSocket</div>
+    <div class="nav-it" data-pg="changelog"><i class="ti ti-rocket"></i> تغییرات پنل <span class="nav-badge">v9.5</span></div>
     <div class="nav-it" data-pg="settings"><i class="ti ti-settings"></i> تنظیمات</div>
     <div class="nav-it" data-pg="support"><i class="ti ti-headset"></i> پشتیبانی</div>
   </div>
@@ -1209,6 +1238,24 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
 </section>
+<section class="pg" id="pg-changelog">
+  <div class="topbar"><div><div class="tb-title"><i class="ti ti-rocket"></i> تغییرات پنل</div></div></div>
+  <div class="chg-head">
+    <div class="chg-head-icon"><i class="ti ti-versions"></i></div>
+    <div class="chg-head-text">
+      <div class="chg-head-title">تاریخچه بروزرسانی‌های X4G</div>
+      <div class="chg-head-sub">فهرست امکانات جدید، بهبودها و رفع اشکال‌ها در هر نسخه</div>
+    </div>
+    <div class="chg-head-ver">نسخه فعلی: v9.5</div>
+  </div>
+  <div class="chg-filters" id="chg-filters">
+    <button class="chg-fil on" data-f="all">همه</button>
+    <button class="chg-fil" data-f="new">جدید</button>
+    <button class="chg-fil" data-f="imp">بهبود</button>
+    <button class="chg-fil" data-f="fix">رفع اشکال</button>
+  </div>
+  <div class="chg-tl" id="chg-tl"></div>
+</section>
 <section class="pg" id="pg-settings">
   <div class="topbar"><div><div class="tb-title"><i class="ti ti-settings"></i> تنظیمات</div></div></div>
   <div class="g2">
@@ -1384,11 +1431,80 @@ overlay.addEventListener('click',closeSb);
 function navTo(name){
   document.querySelectorAll('.nav-it').forEach(n=>n.classList.toggle('on',n.dataset.pg===name));
   document.querySelectorAll('.pg').forEach(p=>p.classList.toggle('on',p.id==='pg-'+name));
-  const loaders={links:loadLinks,connections:loadConns,errors:loadErrs,subscriptions:loadSubsPage,subgroups:loadSubs,logs:loadActivity};
+  const loaders={links:loadLinks,connections:loadConns,errors:loadErrs,subscriptions:loadSubsPage,subgroups:loadSubs,logs:loadActivity,changelog:renderChangelog};
   if(loaders[name])loaders[name]();
   closeSb();window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('.nav-it').forEach(el=>el.addEventListener('click',()=>navTo(el.dataset.pg)));
+/* ===== تغییرات پنل (Changelog) ===== */
+const CHANGELOG=[
+  {v:'v9.5',date:'۱۴۰۴/۰۵',title:'ربات تلگرام، گروه‌های ساب و صفحه تغییرات',items:[
+    {t:'new',x:'بخش «تغییرات پنل» برای مشاهده تاریخچه کامل بروزرسانی‌ها'},
+    {t:'new',x:'ربات مدیریت تلگرام: ساخت، ویرایش، فعال/غیرفعال و حذف کانفیگ‌ها بدون باز کردن پنل'},
+    {t:'new',x:'ویزارد مرحله‌به‌مرحله ساخت کانفیگ داخل ربات (برچسب تا روز انقضا)'},
+    {t:'imp',x:'مدیریت گروه‌های ساب و دریافت لینک ساب حرفه‌ای مستقیم داخل چت تلگرام'},
+    {t:'imp',x:'بهبود صفحه عمومی ساب: نمایش مصرف، وضعیت و QR Code هر کانفیگ'},
+    {t:'fix',x:'رفع مشکل ماندگاری اطلاعات پس از ری‌استارت در صورت اتصال Volume به مسیر داده'}
+  ]},
+  {v:'v9.0',date:'۱۴۰۴/۰۴',title:'گروه‌های ساب و صفحه عمومی',items:[
+    {t:'new',x:'گروه‌های ساب: قرار دادن چند کانفیگ در یک گروه و ساخت لینک ساب اختصاصی'},
+    {t:'new',x:'صفحه عمومی گروه (/p/{key}) با امکان رمزگذاری با پسورد'},
+    {t:'new',x:'خروجی QR Code برای هر کانفیگ و هر ساب'},
+    {t:'imp',x:'بازطراحی کامل داشبورد با تم روشن/تاریک و رابط ریسپانسیو'}
+  ]},
+  {v:'v8.5',date:'۱۴۰۴/۰۳',title:'محدودیت‌های پیشرفته هر کانفیگ',items:[
+    {t:'new',x:'محدودیت سرعت (Mbps) به‌صورت مستقل برای هر کانفیگ'},
+    {t:'new',x:'محدودیت تعداد آی‌پی/کاربر هم‌زمان برای هر کانفیگ'},
+    {t:'new',x:'انقضای خودکار کانفیگ بر اساس تعداد روز'},
+    {t:'imp',x:'نمایش لحظه‌ای مصرف و درصد باقی‌مانده حجم در کارت هر کانفیگ'},
+    {t:'fix',x:'رفع خطای شمارش نادرست ترافیک در اتصالات هم‌زمان'}
+  ]},
+  {v:'v8.0',date:'۱۴۰۴/۰۲',title:'پشتیبانی از XHTTP',items:[
+    {t:'new',x:'ترابرد XHTTP در دو حالت packet-up و stream-up'},
+    {t:'new',x:'تنظیم دستی Fingerprint (uTLS) و ALPN برای هر کانفیگ'},
+    {t:'new',x:'تنظیم دستی پورت اتصال (۱ تا ۶۵۵۳۵) به‌جای پورت ثابت ۴۴۳'},
+    {t:'imp',x:'بهبود پایداری تونل و کاهش مصرف حافظه در رله'}
+  ]},
+  {v:'v7.0',date:'۱۴۰۴/۰۱',title:'داشبورد مدیریتی و ذخیره‌سازی دائمی',items:[
+    {t:'new',x:'داشبورد آماری با نمودار ترافیک ساعتی، اتصالات زنده و لاگ فعالیت‌ها'},
+    {t:'new',x:'صفحه خطاها و ابزار تست WebSocket'},
+    {t:'new',x:'ذخیره‌سازی وضعیت روی دیسک (x4g_state.json) به‌جای حافظه'},
+    {t:'imp',x:'تغییر رمز عبور ادمین از داخل پنل با سنجش قدرت رمز'}
+  ]},
+  {v:'v6.0',date:'۱۴۰۳/۱۲',title:'نسخه پایه X4G',items:[
+    {t:'new',x:'تونل VLESS روی WebSocket و HTTP Proxy داخلی'},
+    {t:'new',x:'ساخت لینک‌های اختصاصی با محدودیت حجم (KB/MB/GB)'},
+    {t:'new',x:'دیپلوی یک‌کلیکی روی Railway'}
+  ]}
+];
+const CHG_META={new:{lbl:'جدید',cls:'tg-new',icon:'ti-sparkles',color:'var(--accent2)'},imp:{lbl:'بهبود',cls:'tg-imp',icon:'ti-arrow-up-circle',color:'#a855f7'},fix:{lbl:'رفع اشکال',cls:'tg-fix',icon:'ti-bug',color:'#f59e0b'}};
+let chgFilter='all';
+function renderChangelog(){
+  const box=document.getElementById('chg-tl');if(!box)return;
+  let html='';
+  CHANGELOG.forEach((rel,i)=>{
+    const items=rel.items.filter(it=>chgFilter==='all'||it.t===chgFilter);
+    if(!items.length)return;
+    html+=`<div class="chg-item${i===0?' latest':''}"><div class="chg-dot"></div><div class="chg-card">
+      <div class="chg-card-top">
+        <span class="chg-ver">${esc(rel.v)}</span>
+        <span class="chg-date"><i class="ti ti-calendar"></i> ${esc(rel.date)}</span>
+        ${i===0?'<span class="chg-new">آخرین نسخه</span>':''}
+      </div>
+      <div class="chg-title">${esc(rel.title)}</div>
+      <ul class="chg-list">${items.map(it=>{
+        const m=CHG_META[it.t]||CHG_META.new;
+        return `<li class="chg-li"><span class="chg-tag ${m.cls}">${m.lbl}</span><i class="ti ${m.icon}" style="color:${m.color}"></i><span>${esc(it.x)}</span></li>`;
+      }).join('')}</ul>
+    </div></div>`;
+  });
+  box.innerHTML=html||'<div class="empty"><i class="ti ti-mood-empty"></i> موردی برای نمایش نیست</div>';
+}
+document.querySelectorAll('#chg-filters .chg-fil').forEach(b=>b.addEventListener('click',()=>{
+  chgFilter=b.dataset.f;
+  document.querySelectorAll('#chg-filters .chg-fil').forEach(x=>x.classList.toggle('on',x===b));
+  renderChangelog();
+}));
 function openModal(id){document.getElementById(id).classList.add('open')}
 function closeModal(id){document.getElementById(id).classList.remove('open')}
 let prevTraf=0,ch1,ch2,ch3;
