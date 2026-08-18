@@ -22,7 +22,9 @@ class NodeApiTests(unittest.TestCase):
     def test_root_is_node(self):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["role"], "node")
+        self.assertEqual(r.json()["role"], "hybrid")
+        self.assertIn("master", r.json()["roles"])
+        self.assertIn("node", r.json()["roles"])
         self.assertEqual(r.json()["version"], main.VERSION)
 
     def test_node_api_rejects_missing_token(self):

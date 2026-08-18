@@ -542,7 +542,7 @@ async def ensure_default_link():
 # ── Basic endpoints ───────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {"service": BRAND, "version": VERSION, "role": "node", "status": "active", "channel": "https://t.me/Farajian2004f"}
+    return {"service": BRAND, "version": VERSION, "role": "hybrid", "roles": ["master", "node"], "status": "active", "channel": "https://t.me/Farajian2004f"}
 
 @app.get("/health")
 async def health():
