@@ -1,4 +1,4 @@
-# pages.py  -  RVG v9.5
+# pages.py  -  RVG v9.6
 # شامل: LOGIN_HTML, DASHBOARD_HTML, get_public_page_html()
 
 # لوگوی RVG (به‌صورت base64 داخلی، بدون نیاز به هاست خارجی)
@@ -61,7 +61,7 @@ input:focus+.ic{color:var(--accent)}
   <div class="card">
     <div class="brand">
       <div class="brand-img"><img src="data:image/png;base64,__LOGO_B64__" alt="RVG"></div>
-      <div><div class="brand-name">RVG</div><div class="brand-sub">v9.5</div></div>
+      <div><div class="brand-name">RVG</div><div class="brand-sub">v9.6</div></div>
     </div>
     <h1>ورود به پنل</h1>
     <p class="sub">رمز عبور را برای دسترسی به داشبورد وارد کنید</p>
@@ -821,6 +821,32 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
 </div>
+<div class="modal-bg" id="modal-create-node">
+  <div class="modal-v2" style="max-width:560px">
+    <div class="modal-v2-head">
+      <button class="modal-v2-close" onclick="closeModal('modal-create-node')"><i class="ti ti-x"></i></button>
+      <div class="modal-v2-icon" style="background:linear-gradient(135deg,var(--accent),var(--green))"><i class="ti ti-server-2"></i></div>
+      <div class="modal-v2-title">افزودن نود جدید</div>
+      <div class="modal-v2-sub">اتصال امن به RVG، Marzban یا 3x-ui از طریق API</div>
+    </div>
+    <div class="modal-v2-body">
+      <div class="modal-v2-field"><label>نام نود</label><input class="modal-v2-input" id="node-name" placeholder="مثلاً سرور فرانسه"></div>
+      <div class="modal-v2-field"><label>آدرس پنل</label><input class="modal-v2-input" id="node-url" dir="ltr" placeholder="https://panel.example.com"></div>
+      <div class="form-row" style="margin-bottom:11px">
+        <div class="fg" style="flex:1"><label>نوع پنل</label><select class="fs" id="node-type" style="width:100%"><option value="rvg">RVG</option><option value="marzban">Marzban</option><option value="xui">3x-ui / X-UI</option></select></div>
+        <div class="fg" style="flex:1"><label>روش ورود</label><select class="fs" id="node-auth" style="width:100%" onchange="toggleNodeAuth()"><option value="token">API Token</option><option value="credentials">نام کاربری و رمز</option></select></div>
+      </div>
+      <div id="node-token-wrap" class="modal-v2-field"><label>API Token</label><input class="modal-v2-input" id="node-token" type="password" dir="ltr" autocomplete="off"></div>
+      <div id="node-creds-wrap" class="form-row" style="display:none;margin-bottom:11px">
+        <div class="fg" style="flex:1"><label>نام کاربری</label><input class="fi" id="node-user" style="width:100%" dir="ltr"></div>
+        <div class="fg" style="flex:1"><label>رمز عبور</label><input class="fi" id="node-pass" type="password" style="width:100%" dir="ltr"></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--t2);margin:10px 0"><input id="node-ssl" type="checkbox" checked> بررسی گواهی SSL</label>
+      <div class="cl"><i class="ti ti-shield-check"></i><span>قبل از ذخیره، اتصال و دسترسی API آزمایش می‌شود. برای RVG باید روی نود متغیر NODE_API_TOKEN تنظیم شده باشد.</span></div>
+      <div class="modal-v2-footer"><button class="btn btn-o" onclick="closeModal('modal-create-node')">انصراف</button><button class="btn btn-p" id="node-save-btn" onclick="createNode()"><i class="ti ti-plug-connected"></i> تست و ذخیره</button></div>
+    </div>
+  </div>
+</div>
 <div class="mob-top">
   <div class="ml">
     <div class="mob-logo"><img src="data:image/png;base64,__LOGO_B64__" alt="RVG"></div>
@@ -836,13 +862,14 @@ a{color:inherit;text-decoration:none}
   <button class="sb-close" id="close-sb"><i class="ti ti-x"></i></button>
   <div class="logo">
     <div class="logo-img"><img src="data:image/png;base64,__LOGO_B64__" alt="RVG"></div>
-    <div><div class="logo-name">RVG</div><div class="logo-sub">v9.5</div></div>
+    <div><div class="logo-name">RVG</div><div class="logo-sub">v9.6</div></div>
   </div>
   <div class="nav-wrap">
     <div class="nav-sec">پنل</div>
     <div class="nav-it on" data-pg="overview"><i class="ti ti-layout-dashboard"></i> داشبورد</div>
     <div class="nav-it" data-pg="links"><i class="ti ti-link-plus"></i> کانفیگ‌ها <span class="nav-badge" id="links-nb">0</span></div>
     <div class="nav-it" data-pg="subgroups"><i class="ti ti-folders"></i> گروه‌های ساب <span class="nav-badge" id="subs-nb">0</span></div>
+    <div class="nav-it" data-pg="nodes"><i class="ti ti-server-2"></i> نودها <span class="nav-badge" id="nodes-nb">0</span></div>
     <div class="nav-it" data-pg="subscriptions"><i class="ti ti-rss"></i> سابسکریپشن</div>
     <div class="nav-it" data-pg="traffic"><i class="ti ti-chart-area"></i> ترافیک</div>
     <div class="nav-it" data-pg="connections"><i class="ti ti-plug-connected"></i> اتصالات <span class="nav-badge" id="conns-nb">0</span></div>
@@ -851,7 +878,7 @@ a{color:inherit;text-decoration:none}
     <div class="nav-it" data-pg="logs"><i class="ti ti-history"></i> لاگ فعالیت‌ها</div>
     <div class="nav-it" data-pg="errors"><i class="ti ti-alert-triangle"></i> خطاها</div>
     <div class="nav-it" data-pg="testws"><i class="ti ti-wifi"></i> تست WebSocket</div>
-    <div class="nav-it" data-pg="changelog"><i class="ti ti-rocket"></i> تغییرات پنل <span class="nav-badge">v9.5</span></div>
+    <div class="nav-it" data-pg="changelog"><i class="ti ti-rocket"></i> تغییرات پنل <span class="nav-badge">v9.6</span></div>
     <div class="nav-it" data-pg="settings"><i class="ti ti-settings"></i> تنظیمات</div>
     <div class="nav-it" data-pg="support"><i class="ti ti-headset"></i> پشتیبانی</div>
   </div>
@@ -914,7 +941,7 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
   <div class="dash-footer">
-    <span class="df-text">RVG v9.5 · Railway</span>
+    <span class="df-text">RVG v9.6 · Railway</span>
     <a class="df-link" href="https://t.me/Farajian2004f" target="_blank"><i class="ti ti-brand-telegram"></i> t.me/Farajian2004f</a>
     
   </div>
@@ -1091,6 +1118,14 @@ a{color:inherit;text-decoration:none}
     <div class="subs-empty-v2"><div class="subs-empty-v2-icon"><i class="ti ti-folders"></i></div><div class="subs-empty-v2-title">هنوز گروهی وجود ندارد</div><div class="subs-empty-v2-sub">یک گروه جدید بسازید تا کانفیگ‌ها را دسته‌بندی کنید</div></div>
   </div>
 </section>
+<section class="pg" id="pg-nodes">
+  <div class="topbar">
+    <div><div class="tb-title"><i class="ti ti-server-2"></i> مدیریت نودها</div><div class="tb-sub">اتصال و مدیریت پنل‌های RVG، Marzban و 3x-ui از یک داشبورد</div></div>
+    <div class="tb-right"><span class="badge bg-blue" id="nodes-pg-cnt">۰ نود</span><button class="btn btn-p" onclick="openModal('modal-create-node')"><i class="ti ti-server-2"></i> افزودن نود</button></div>
+  </div>
+  <div class="cl" style="margin-top:0;margin-bottom:16px"><i class="ti ti-info-circle"></i><span>توکن و رمز نودها هرگز به مرورگر برگردانده نمی‌شوند. برای دریافت ساب تجمیعی ادمین از <code>/api/nodes-subscription</code> استفاده کنید.</span></div>
+  <div class="sub-grid" id="nodes-grid"><div class="subs-empty-v2"><div class="subs-empty-v2-icon"><i class="ti ti-server-off"></i></div><div class="subs-empty-v2-title">هنوز نودی اضافه نشده</div><div class="subs-empty-v2-sub">اولین پنل راه‌دور را به RVG متصل کنید</div></div></div>
+</section>
 <section class="pg" id="pg-subscriptions">
   <div class="topbar"><div><div class="tb-title"><i class="ti ti-rss"></i> سابسکریپشن</div><div class="tb-sub">لینک‌های اشتراک برای اپ‌های v2ray</div></div></div>
   <div class="g2">
@@ -1246,7 +1281,7 @@ a{color:inherit;text-decoration:none}
       <div class="chg-head-title">تاریخچه بروزرسانی‌های RVG</div>
       <div class="chg-head-sub">فهرست امکانات جدید، بهبودها و رفع اشکال‌ها در هر نسخه</div>
     </div>
-    <div class="chg-head-ver">نسخه فعلی: v9.5</div>
+    <div class="chg-head-ver">نسخه فعلی: v9.6</div>
   </div>
   <div class="chg-filters" id="chg-filters">
     <button class="chg-fil on" data-f="all">همه</button>
@@ -1269,7 +1304,7 @@ a{color:inherit;text-decoration:none}
       </div>
       <div class="srv-tiles">
         <div class="srv-tile"><div class="srv-tile-icon"><i class="ti ti-route"></i></div><div class="srv-tile-text"><div class="srv-tile-label">پورت پیش‌فرض</div><div class="srv-tile-val">443 (TLS) · قابل تغییر در هر کانفیگ</div></div></div>
-        <div class="srv-tile"><div class="srv-tile-icon"><i class="ti ti-versions"></i></div><div class="srv-tile-text"><div class="srv-tile-label">نسخه</div><div class="srv-tile-val">v9.5</div></div></div>
+        <div class="srv-tile"><div class="srv-tile-icon"><i class="ti ti-versions"></i></div><div class="srv-tile-text"><div class="srv-tile-label">نسخه</div><div class="srv-tile-val">v9.6</div></div></div>
         <div class="srv-tile"><div class="srv-tile-icon"><i class="ti ti-brand-fastapi"></i></div><div class="srv-tile-text"><div class="srv-tile-label">فریم‌ورک</div><div class="srv-tile-val">FastAPI + Uvicorn</div></div></div>
         <div class="srv-tile"><div class="srv-tile-icon"><i class="ti ti-cloud"></i></div><div class="srv-tile-text"><div class="srv-tile-label">پلتفرم</div><div class="srv-tile-val">Railway</div></div></div>
         <div class="srv-tile" style="grid-column:1/-1"><div class="srv-tile-icon"><i class="ti ti-device-floppy"></i></div><div class="srv-tile-text"><div class="srv-tile-label">ذخیره‌سازی</div><div class="srv-tile-val">JSON File (/data)</div></div></div>
@@ -1431,13 +1466,20 @@ overlay.addEventListener('click',closeSb);
 function navTo(name){
   document.querySelectorAll('.nav-it').forEach(n=>n.classList.toggle('on',n.dataset.pg===name));
   document.querySelectorAll('.pg').forEach(p=>p.classList.toggle('on',p.id==='pg-'+name));
-  const loaders={links:loadLinks,connections:loadConns,errors:loadErrs,subscriptions:loadSubsPage,subgroups:loadSubs,logs:loadActivity,changelog:renderChangelog};
+  const loaders={links:loadLinks,connections:loadConns,errors:loadErrs,subscriptions:loadSubsPage,subgroups:loadSubs,nodes:loadNodes,logs:loadActivity,changelog:renderChangelog};
   if(loaders[name])loaders[name]();
   closeSb();window.scrollTo({top:0,behavior:'smooth'});
 }
 document.querySelectorAll('.nav-it').forEach(el=>el.addEventListener('click',()=>navTo(el.dataset.pg)));
 /* ===== تغییرات پنل (Changelog) ===== */
 const CHANGELOG=[
+  {v:'v9.6',date:'۱۴۰۵/۰۵',title:'مدیریت متمرکز چند نود',items:[
+    {t:'new',x:'اتصال به پنل‌های RVG، Marzban و 3x-ui از بخش نودها'},
+    {t:'new',x:'پشتیبانی از API Token یا نام کاربری و رمز برای هر نود'},
+    {t:'new',x:'مانیتورینگ کاربران، وضعیت، ترافیک و کانفیگ‌های پنل‌های راه‌دور'},
+    {t:'new',x:'ساخت و حذف کانفیگ روی نود و خروجی سابسکریپشن تجمیعی'},
+    {t:'imp',x:'API اختصاصی امن برای اتصال پنل‌های RVG به یکدیگر'}
+  ]},
   {v:'v9.5',date:'۱۴۰۴/۰۵',title:'ربات تلگرام، گروه‌های ساب و صفحه تغییرات',items:[
     {t:'new',x:'بخش «تغییرات پنل» برای مشاهده تاریخچه کامل بروزرسانی‌ها'},
     {t:'new',x:'ربات مدیریت تلگرام: ساخت، ویرایش، فعال/غیرفعال و حذف کانفیگ‌ها بدون باز کردن پنل'},
@@ -1839,6 +1881,61 @@ async function saveSubLinks(){
     loadSubs();loadLinks();
   }catch(e){toast('خطا در ذخیره','err')}
 }
+function toggleNodeAuth(){
+  const token=document.getElementById('node-auth').value==='token';
+  document.getElementById('node-token-wrap').style.display=token?'block':'none';
+  document.getElementById('node-creds-wrap').style.display=token?'none':'flex';
+}
+async function createNode(){
+  const btn=document.getElementById('node-save-btn');
+  const body={name:document.getElementById('node-name').value.trim(),base_url:document.getElementById('node-url').value.trim(),panel_type:document.getElementById('node-type').value,auth_type:document.getElementById('node-auth').value,token:document.getElementById('node-token').value,username:document.getElementById('node-user').value.trim(),password:document.getElementById('node-pass').value,verify_ssl:document.getElementById('node-ssl').checked};
+  btn.disabled=true;btn.innerHTML='<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> در حال تست...';
+  try{
+    const r=await authF('/api/nodes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||'اتصال ناموفق بود');
+    closeModal('modal-create-node');
+    ['node-name','node-url','node-token','node-user','node-pass'].forEach(id=>document.getElementById(id).value='');
+    toast('نود متصل و ذخیره شد ✓','ok');loadNodes();
+  }catch(e){toast(e.message,'err')}
+  finally{btn.disabled=false;btn.innerHTML='<i class="ti ti-plug-connected"></i> تست و ذخیره'}
+}
+const NODE_TYPE_LABEL={rvg:'RVG',marzban:'Marzban',xui:'3x-ui'};
+async function loadNodes(){
+  try{
+    const r=await authF('/api/nodes'),d=await r.json(),nodes=d.nodes||[];
+    document.getElementById('nodes-nb').textContent=nodes.length;
+    document.getElementById('nodes-pg-cnt').textContent=toFa(nodes.length)+' نود';
+    const grid=document.getElementById('nodes-grid');
+    if(!nodes.length){grid.innerHTML='<div class="subs-empty-v2"><div class="subs-empty-v2-icon"><i class="ti ti-server-off"></i></div><div class="subs-empty-v2-title">هنوز نودی اضافه نشده</div><div class="subs-empty-v2-sub">اولین پنل راه‌دور را به RVG متصل کنید</div></div>';return}
+    grid.innerHTML=nodes.map(n=>{
+      const o=n.last_overview||{},online=n.last_error?false:!!n.last_check;
+      return `<div class="sub-card" id="node-${n.id}">
+        <div class="sub-card-top"><div class="sub-card-head-v2"><div class="sub-card-icon" style="background:linear-gradient(135deg,var(--accent),var(--green))"><i class="ti ti-server-2"></i></div><div class="sub-card-titles"><div class="sub-card-name-v2">${esc(n.name)}</div><div class="sub-card-desc-v2" dir="ltr">${esc(n.base_url)}</div></div><div class="sub-card-lock-badge ${online?'open':'locked'}"><i class="ti ${online?'ti-wifi':'ti-wifi-off'}"></i></div></div>
+        <div class="sub-card-stats"><div class="sub-card-stat"><div class="sub-card-stat-val">${toFa(o.users??'—')}</div><div class="sub-card-stat-label">کاربر</div></div><div class="sub-card-stat"><div class="sub-card-stat-val" style="color:var(--green-t)">${toFa(o.active??'—')}</div><div class="sub-card-stat-label">فعال</div></div><div class="sub-card-stat"><div class="sub-card-stat-val" style="font-size:12px">${o.traffic_bytes!=null?fmtB(o.traffic_bytes):'—'}</div><div class="sub-card-stat-label">ترافیک</div></div></div></div>
+        <div class="sub-card-url-row"><span class="badge bg-blue">${NODE_TYPE_LABEL[n.panel_type]||esc(n.panel_type)}</span><span class="sub-card-url-text">${n.auth_type==='token'?'API Token':'Credentials'} · ${n.verify_ssl?'SSL ✓':'SSL بررسی نمی‌شود'}</span></div>
+        ${n.last_error?`<div style="margin:10px 20px;color:var(--red-t);font-size:10.5px">${esc(n.last_error)}</div>`:''}
+        <div id="node-configs-${n.id}"></div>
+        <div class="sub-card-bottom"><button class="btn btn-sm btn-g" onclick="testNode('${n.id}')"><i class="ti ti-refresh"></i> تست</button><button class="btn btn-sm btn-pur" onclick="showNodeConfigs('${n.id}')"><i class="ti ti-users"></i> کانفیگ‌ها</button><button class="btn btn-sm btn-p" onclick="createRemoteConfig('${n.id}','${n.panel_type}')"><i class="ti ti-plus"></i> ساخت</button><button class="btn btn-sm btn-d btn-icon" onclick="deleteNode('${n.id}')"><i class="ti ti-trash"></i></button></div>
+      </div>`;
+    }).join('');
+  }catch(e){console.error(e)}
+}
+async function testNode(id){
+  toast('در حال بررسی اتصال...');
+  try{const r=await authF('/api/nodes/'+id+'/test',{method:'POST'}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||'خطا');toast('نود آنلاین است ✓','ok');loadNodes();}catch(e){toast(e.message,'err');loadNodes()}
+}
+async function showNodeConfigs(id){
+  const box=document.getElementById('node-configs-'+id);box.innerHTML='<div style="padding:14px 20px;color:var(--t3)">در حال دریافت...</div>';
+  try{const r=await authF('/api/nodes/'+id+'/configs'),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||'خطا');const cs=d.configs||[];box.innerHTML=`<div style="padding:12px 20px;border-top:1px solid var(--card-b)">${cs.length?cs.slice(0,50).map(c=>`<div class="sr"><span class="sr-k"><span class="dot ${c.active!==false?'dg':'dr'}"></span>${esc(c.label||c.username||c.id||c.uuid)}</span><span style="display:flex;gap:6px;align-items:center"><small style="color:var(--t3)">${fmtB(c.used_bytes||0)}</small><button class="btn btn-sm btn-d btn-icon" onclick="deleteRemoteConfig('${id}','${encodeURIComponent(c.id||c.uuid||c.username)}')"><i class="ti ti-trash"></i></button></span></div>`).join(''):'<div class="empty" style="padding:15px">کانفیگی نیست</div>'}</div>`;}catch(e){box.innerHTML='<div style="padding:12px 20px;color:var(--red-t)">'+esc(e.message)+'</div>'}
+}
+async function createRemoteConfig(id,type){
+  const sample=type==='rvg'?'{"label":"کاربر جدید","limit_bytes":0,"protocol":"vless-ws"}':type==='marzban'?'{"username":"user1","proxies":{},"inbounds":{},"expire":0,"data_limit":0}':'{"remark":"Inbound جدید","enable":true,"port":10000,"protocol":"vless","settings":"{\\"clients\\":[]}"}';
+  const raw=prompt('Payload بومی API را به‌صورت JSON وارد کنید:',sample);if(!raw)return;
+  try{const payload=JSON.parse(raw),r=await authF('/api/nodes/'+id+'/configs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||'خطا');toast('کانفیگ روی نود ساخته شد ✓','ok');showNodeConfigs(id);}catch(e){toast(e.message||'JSON نامعتبر است','err')}
+}
+async function deleteRemoteConfig(id,cid){if(!confirm('کانفیگ از پنل راه‌دور حذف شود؟'))return;try{const r=await authF('/api/nodes/'+id+'/configs/'+cid,{method:'DELETE'}),d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||'خطا');toast('از نود حذف شد','ok');showNodeConfigs(id);}catch(e){toast(e.message,'err')}}
+async function deleteNode(id){if(!confirm('اتصال این نود حذف شود؟ اطلاعات خود پنل حذف نمی‌شود.'))return;try{const r=await authF('/api/nodes/'+id,{method:'DELETE'});if(!r.ok)throw new Error();toast('نود حذف شد','ok');loadNodes()}catch(e){toast('خطا','err')}}
+
 async function loadSubsPage(){
   document.getElementById('sub-all-url').textContent=location.protocol+'//'+location.host+'/sub-all';
   try{
@@ -2065,12 +2162,13 @@ document.addEventListener('DOMContentLoaded',async()=>{
   initCharts();
   document.getElementById('set-host').textContent=location.host;
   document.getElementById('sub-all-url')&&(document.getElementById('sub-all-url').textContent=location.protocol+'//'+location.host+'/sub-all');
-  fetchStats();fetchDefaultVless();loadLinks();loadSubs();
+  fetchStats();fetchDefaultVless();loadLinks();loadSubs();loadNodes();
   setInterval(fetchStats,4000);
   setInterval(()=>{
     if(document.getElementById('pg-links').classList.contains('on'))loadLinks();
     if(document.getElementById('pg-subgroups').classList.contains('on'))loadSubs();
     if(document.getElementById('pg-subscriptions').classList.contains('on'))loadSubsPage();
+    if(document.getElementById('pg-nodes').classList.contains('on'))loadNodes();
     if(document.getElementById('pg-connections').classList.contains('on'))loadConns();
     if(document.getElementById('pg-logs').classList.contains('on'))loadActivity();
   },5000);
@@ -2278,7 +2376,7 @@ html,body{{min-height:100%;background:var(--bg);font-family:var(--serif);color:v
   <div class="top">
     <div class="brand">
       <div class="brand-img"><img src="data:image/png;base64,{LOGO_B64}" alt="RVG"></div>
-      <div><div class="brand-name">RVG</div><div class="brand-sub">v9.5</div></div>
+      <div><div class="brand-name">RVG</div><div class="brand-sub">v9.6</div></div>
     </div>
     <div class="top-actions">
       <button class="icon-btn" id="theme-toggle" onclick="toggleTheme()" title="تغییر تم"><i class="ti ti-sun" id="theme-icon"></i></button>
@@ -2288,7 +2386,7 @@ html,body{{min-height:100%;background:var(--bg);font-family:var(--serif);color:v
   <div id="root">
     <div class="empty-state"><i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i>در حال بارگذاری...</div>
   </div>
-  <div class="footer">پشتیبانی: <a href="https://t.me/Farajian2004f" target="_blank">@Farajian2004f</a> · RVG v9.5</div>
+  <div class="footer">پشتیبانی: <a href="https://t.me/Farajian2004f" target="_blank">@Farajian2004f</a> · RVG v9.6</div>
 </div>
 <script>
 const UUID_KEY='{uuid_key}';

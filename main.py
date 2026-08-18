@@ -18,6 +18,8 @@ import uvicorn
 import httpx
 import logging
 
+from panel_nodes import NodeError, PanelNodeClient, normalize_base_url
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 # نام برند/پنل و پیشوند ثابت اسم کانفیگ‌ها — برای تغییر نام، فقط همین مقدار را عوض کنید
 BRAND = "RVG"
@@ -72,7 +74,7 @@ app.add_middleware(
 )
 
 async def load_state():
-    global LINKS, AUTH, SUBS
+    global LINKS, AUTH, SUBS, NODES
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         if DATA_FILE.exists():
@@ -81,6 +83,7 @@ async def load_state():
             data = json.loads(raw)
             LINKS.update(data.get("links", {}))
             SUBS.update(data.get("subs", {}))
+            NODES.update(data.get("nodes", {}))
             if "password_hash" in data:
                 AUTH["password_hash"] = data["password_hash"]
             logger.info(f"State loaded: {len(LINKS)} links, {len(SUBS)} subs")
@@ -94,6 +97,7 @@ async def save_state():
             data = {
                 "links": dict(LINKS),
                 "subs": dict(SUBS),
+                "nodes": dict(NODES),
                 "password_hash": AUTH["password_hash"],
                 "saved_at": datetime.now().isoformat(),
             }
@@ -120,6 +124,8 @@ LINKS: dict = {}
 LINKS_LOCK = asyncio.Lock()
 SUBS: dict = {}
 SUBS_LOCK = asyncio.Lock()
+NODES: dict = {}
+NODES_LOCK = asyncio.Lock()
 
 # پروتکل‌های پشتیبانی‌شده برای هر کانفیگ
 PROTOCOLS = ("vless-ws", "xhttp-packet-up", "xhttp-stream-up", "xhttp-stream-one")
@@ -192,6 +198,16 @@ async def require_auth(request: Request):
         raise HTTPException(status_code=401, detail="unauthorized")
     return token
 
+async def require_node_api(request: Request):
+    """Authenticate another RVG panel without exposing the dashboard session."""
+    expected = os.environ.get("NODE_API_TOKEN", "").strip()
+    supplied = request.headers.get("authorization", "")
+    if supplied.lower().startswith("bearer "):
+        supplied = supplied[7:].strip()
+    if not expected or not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="invalid node API token")
+    return supplied
+
 # ── Startup / Shutdown ────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
@@ -204,7 +220,7 @@ async def startup():
     await load_state()
     await _tg_start_bot()
     log_activity("system", "سرور راه‌اندازی شد", "ok")
-    logger.info(f"{BRAND} v9.5 started on port {CONFIG['port']}")
+    logger.info(f"{BRAND} v9.6 started on port {CONFIG['port']}")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -411,7 +427,7 @@ async def ensure_default_link():
 # ── Basic endpoints ───────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {"service": BRAND, "version": "9.5", "status": "active", "channel": "https://t.me/Farajian2004f"}
+    return {"service": BRAND, "version": "9.6", "status": "active", "channel": "https://t.me/Farajian2004f"}
 
 @app.get("/health")
 async def health():
@@ -998,6 +1014,245 @@ async def delete_link(uid: str, _=Depends(require_auth)):
     if label is None:
         raise HTTPException(status_code=404, detail="link not found")
     return {"ok": True, "deleted": uid}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Node manager — RVG / Marzban / 3x-ui
+# ══════════════════════════════════════════════════════════════════════════════
+NODE_PANEL_TYPES = {"rvg", "marzban", "xui"}
+NODE_AUTH_TYPES = {"token", "credentials"}
+NODE_SECRET_FIELDS = {"token", "username", "password"}
+
+def public_node(node_id: str, node: dict) -> dict:
+    """Return node metadata without ever sending credentials back to the browser."""
+    return {
+        "id": node_id,
+        **{k: v for k, v in node.items() if k not in NODE_SECRET_FIELDS},
+        "has_token": bool(node.get("token")),
+        "has_credentials": bool(node.get("username") or node.get("password")),
+    }
+
+def node_or_404(node_id: str) -> dict:
+    node = NODES.get(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="نود پیدا نشد")
+    return dict(node)
+
+def node_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, NodeError):
+        return HTTPException(status_code=502, detail=str(exc))
+    logger.exception("Unexpected node error")
+    return HTTPException(status_code=502, detail="خطای غیرمنتظره در ارتباط با نود")
+
+@app.get("/api/nodes")
+async def list_nodes(_=Depends(require_auth)):
+    async with NODES_LOCK:
+        nodes = [public_node(node_id, node) for node_id, node in NODES.items()]
+    nodes.sort(key=lambda n: n.get("created_at", ""), reverse=True)
+    return {"nodes": nodes}
+
+@app.post("/api/nodes")
+async def create_node(request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    panel_type = str(body.get("panel_type", "rvg")).lower()
+    auth_type = str(body.get("auth_type", "token")).lower()
+    if panel_type not in NODE_PANEL_TYPES or auth_type not in NODE_AUTH_TYPES:
+        raise HTTPException(status_code=400, detail="نوع پنل یا احراز هویت نامعتبر است")
+    try:
+        base_url = normalize_base_url(str(body.get("base_url", "")))
+    except NodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if auth_type == "token" and not str(body.get("token", "")).strip():
+        raise HTTPException(status_code=400, detail="API Token الزامی است")
+    if auth_type == "credentials" and not str(body.get("password", "")):
+        raise HTTPException(status_code=400, detail="رمز عبور الزامی است")
+    node_id = secrets.token_urlsafe(12)
+    node = {
+        "name": str(body.get("name") or base_url)[:80],
+        "panel_type": panel_type,
+        "base_url": base_url,
+        "auth_type": auth_type,
+        "token": str(body.get("token", "")).strip(),
+        "username": str(body.get("username", "")).strip(),
+        "password": str(body.get("password", "")),
+        "verify_ssl": bool(body.get("verify_ssl", True)),
+        "enabled": bool(body.get("enabled", True)),
+        "created_at": datetime.now().isoformat(),
+        "last_check": None,
+        "last_error": None,
+    }
+    # Test before saving so a typo does not create a dead node.
+    try:
+        async with PanelNodeClient(node) as remote:
+            overview = await remote.overview()
+    except Exception as exc:
+        raise node_http_error(exc)
+    node["last_check"] = datetime.now().isoformat()
+    node["last_overview"] = overview
+    async with NODES_LOCK:
+        NODES[node_id] = node
+    await save_state()
+    log_activity("node", f"نود «{node['name']}» اضافه شد", "ok")
+    return {"node": public_node(node_id, node)}
+
+@app.patch("/api/nodes/{node_id}")
+async def update_node(node_id: str, request: Request, _=Depends(require_auth)):
+    body = await request.json()
+    async with NODES_LOCK:
+        if node_id not in NODES:
+            raise HTTPException(status_code=404, detail="نود پیدا نشد")
+        node = NODES[node_id]
+        for field in ("name", "panel_type", "auth_type", "token", "username", "password", "enabled", "verify_ssl"):
+            if field in body and (field not in NODE_SECRET_FIELDS or body[field] not in (None, "")):
+                node[field] = body[field]
+        if "base_url" in body:
+            try:
+                node["base_url"] = normalize_base_url(str(body["base_url"]))
+            except NodeError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        snapshot = dict(node)
+    await save_state()
+    return {"node": public_node(node_id, snapshot)}
+
+@app.delete("/api/nodes/{node_id}")
+async def delete_node(node_id: str, _=Depends(require_auth)):
+    async with NODES_LOCK:
+        node = NODES.pop(node_id, None)
+    if not node:
+        raise HTTPException(status_code=404, detail="نود پیدا نشد")
+    await save_state()
+    log_activity("node", f"نود «{node.get('name', node_id)}» حذف شد", "warn")
+    return {"ok": True}
+
+@app.post("/api/nodes/{node_id}/test")
+async def test_node(node_id: str, _=Depends(require_auth)):
+    node = node_or_404(node_id)
+    try:
+        async with PanelNodeClient(node) as remote:
+            overview = await remote.overview()
+    except Exception as exc:
+        async with NODES_LOCK:
+            if node_id in NODES:
+                NODES[node_id]["last_check"] = datetime.now().isoformat()
+                NODES[node_id]["last_error"] = str(exc)
+        asyncio.create_task(save_state())
+        raise node_http_error(exc)
+    async with NODES_LOCK:
+        if node_id in NODES:
+            NODES[node_id]["last_check"] = datetime.now().isoformat()
+            NODES[node_id]["last_error"] = None
+            NODES[node_id]["last_overview"] = overview
+    asyncio.create_task(save_state())
+    return {"ok": True, "overview": overview}
+
+@app.get("/api/nodes/{node_id}/configs")
+async def node_configs(node_id: str, _=Depends(require_auth)):
+    node = node_or_404(node_id)
+    try:
+        async with PanelNodeClient(node) as remote:
+            configs = await remote.list_configs()
+        return {"configs": configs}
+    except Exception as exc:
+        raise node_http_error(exc)
+
+@app.post("/api/nodes/{node_id}/configs")
+async def node_create_config(node_id: str, request: Request, _=Depends(require_auth)):
+    node = node_or_404(node_id)
+    try:
+        async with PanelNodeClient(node) as remote:
+            result = await remote.create_config(await request.json())
+        return {"ok": True, "result": result}
+    except Exception as exc:
+        raise node_http_error(exc)
+
+@app.patch("/api/nodes/{node_id}/configs/{config_id}")
+async def node_update_config(node_id: str, config_id: str, request: Request, _=Depends(require_auth)):
+    node = node_or_404(node_id)
+    try:
+        async with PanelNodeClient(node) as remote:
+            result = await remote.update_config(config_id, await request.json())
+        return {"ok": True, "result": result}
+    except Exception as exc:
+        raise node_http_error(exc)
+
+@app.delete("/api/nodes/{node_id}/configs/{config_id}")
+async def node_delete_config(node_id: str, config_id: str, _=Depends(require_auth)):
+    node = node_or_404(node_id)
+    try:
+        async with PanelNodeClient(node) as remote:
+            result = await remote.delete_config(config_id)
+        return {"ok": True, "result": result}
+    except Exception as exc:
+        raise node_http_error(exc)
+
+@app.get("/api/nodes-subscription")
+async def nodes_subscription(_=Depends(require_auth)):
+    """Aggregate share links exposed by configured nodes into one base64 subscription."""
+    import base64
+    links = []
+    errors = []
+    async with NODES_LOCK:
+        nodes = [(node_id, dict(node)) for node_id, node in NODES.items() if node.get("enabled", True)]
+    for node_id, node in nodes:
+        try:
+            async with PanelNodeClient(node) as remote:
+                configs = await remote.list_configs()
+            for config in configs:
+                value = config.get("vless_link") or config.get("subscription_url") or config.get("link")
+                if value:
+                    links.append(value)
+        except Exception as exc:
+            errors.append(f"{node.get('name', node_id)}: {exc}")
+    content = base64.b64encode("\n".join(links).encode()).decode()
+    return Response(content=content, media_type="text/plain", headers={"X-RVG-Node-Errors": str(len(errors))})
+
+# API exposed by an RVG child panel. Set NODE_API_TOKEN on that deployment.
+@app.get("/api/node/v1/overview")
+async def node_api_overview(_=Depends(require_node_api)):
+    async with LINKS_LOCK:
+        snap = dict(LINKS)
+    return {"version": "9.6", "links_count": len(snap),
+            "active_links": sum(1 for item in snap.values() if is_link_allowed(item)),
+            "active_connections": len(connections), "total_bytes": stats["total_bytes"], "uptime": uptime()}
+
+@app.get("/api/node/v1/configs")
+async def node_api_configs(request: Request, _=Depends(require_node_api)):
+    host = get_host(request)
+    async with LINKS_LOCK:
+        snap = dict(LINKS)
+    return {"configs": [{"uuid": uid, "id": uid, **item,
+                         "vless_link": vless_link_for_link(item, uid, host)} for uid, item in snap.items()]}
+
+@app.post("/api/node/v1/configs")
+async def node_api_create_config(request: Request, _=Depends(require_node_api)):
+    body = await request.json()
+    uid, link = await make_link(label=body.get("label") or "لینک نود",
+                                limit_bytes=max(0, int(body.get("limit_bytes", 0) or 0)),
+                                expires_at=body.get("expires_at"), note=body.get("note") or "",
+                                protocol=body.get("protocol") or DEFAULT_PROTOCOL,
+                                fingerprint=body.get("fingerprint") or DEFAULT_FINGERPRINT,
+                                alpn=body.get("alpn") or "", port=int(body.get("port", DEFAULT_PORT) or DEFAULT_PORT),
+                                ip_limit=max(0, int(body.get("ip_limit", 0) or 0)),
+                                speed_limit_bytes=max(0, int(body.get("speed_limit_bytes", 0) or 0)))
+    return {"uuid": uid, **link, "vless_link": vless_link_for_link(link, uid, get_host(request))}
+
+@app.patch("/api/node/v1/configs/{uid}")
+async def node_api_update_config(uid: str, request: Request, _=Depends(require_node_api)):
+    body = await request.json()
+    async with LINKS_LOCK:
+        if uid not in LINKS:
+            raise HTTPException(status_code=404, detail="config not found")
+        link = LINKS[uid]
+        for field in ("label", "note", "active", "expires_at", "limit_bytes", "speed_limit_bytes", "ip_limit"):
+            if field in body:
+                link[field] = body[field]
+    asyncio.create_task(save_state())
+    return {"ok": True}
+
+@app.delete("/api/node/v1/configs/{uid}")
+async def node_api_delete_config(uid: str, _=Depends(require_node_api)):
+    if await remove_link(uid) is None:
+        raise HTTPException(status_code=404, detail="config not found")
+    return {"ok": True}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # VLESS Relay — جدا شده به relay_vless.py (دست نخورده)
