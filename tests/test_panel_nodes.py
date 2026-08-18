@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 
-from panel_nodes import NodeError, PanelNodeClient, normalize_base_url
+from panel_nodes import MasterClient, NodeError, PanelNodeClient, extract_bearer_token, normalize_base_url
 
 
 def response(data, status=200):
@@ -72,6 +72,61 @@ class AdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(configs[0]["id"], "ali")
         self.assertTrue(configs[0]["active"])
         self.assertEqual(configs[0]["subscription_url"], "https://node.example/sub/ali")
+
+
+class TokenExtractTests(unittest.TestCase):
+    def test_bearer_and_extra_header(self):
+        self.assertEqual(extract_bearer_token("Bearer secret"), "secret")
+        self.assertEqual(extract_bearer_token("", "from-header"), "from-header")
+        self.assertEqual(extract_bearer_token("   ", "fallback"), "fallback")
+
+
+class MasterClientTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        client = getattr(self, "client", None)
+        if client:
+            await client.client.aclose()
+
+    async def test_generic_master_skips_register(self):
+        self.client = MasterClient({
+            "panel_type": "generic", "url": "https://master.example",
+            "verify_ssl": True,
+        })
+        self.client._request = AsyncMock(return_value=response({"status": "ok"}))
+        result = await self.client.register("https://node.example", "tok", "node-1")
+        self.assertFalse(result["registered"])
+        self.assertTrue(result["ping"]["online"])
+
+    async def test_rvg_register_posts_node_payload(self):
+        self.client = MasterClient({
+            "panel_type": "rvg", "url": "https://master.example",
+            "auth_type": "token", "token": "master-token",
+        })
+        self.client._request = AsyncMock(return_value=response({"node": {"id": "n1"}}))
+        result = await self.client.register("https://node.example/", "node-token", "فرانسه")
+        self.assertTrue(result["registered"])
+        method, path = self.client._request.await_args.args[:2]
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/api/nodes")
+        payload = self.client._request.await_args.kwargs["json"]
+        self.assertEqual(payload["base_url"], "https://node.example")
+        self.assertEqual(payload["token"], "node-token")
+        self.assertEqual(payload["panel_type"], "rvg")
+
+    async def test_heartbeat_falls_back_to_ping(self):
+        self.client = MasterClient({
+            "panel_type": "rvg", "url": "https://master.example",
+        })
+
+        async def boom(method, path, **kwargs):
+            if path.endswith("/heartbeat"):
+                raise NodeError("not found")
+            return response({"status": "ok", "uptime": "01:00"})
+
+        self.client._request = AsyncMock(side_effect=boom)
+        data = await self.client.heartbeat({"version": "9.7"})
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["via"], "ping")
 
 
 if __name__ == "__main__":

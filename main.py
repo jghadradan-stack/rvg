@@ -18,11 +18,12 @@ import uvicorn
 import httpx
 import logging
 
-from panel_nodes import NodeError, PanelNodeClient, normalize_base_url
+from panel_nodes import MasterClient, NodeError, PanelNodeClient, extract_bearer_token, normalize_base_url
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 # نام برند/پنل و پیشوند ثابت اسم کانفیگ‌ها — برای تغییر نام، فقط همین مقدار را عوض کنید
 BRAND = "RVG"
+VERSION = "9.7"
 
 logger = logging.getLogger(BRAND)
 
@@ -74,7 +75,7 @@ app.add_middleware(
 )
 
 async def load_state():
-    global LINKS, AUTH, SUBS, NODES
+    global LINKS, AUTH, SUBS, NODES, NODE_API, MASTER
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         if DATA_FILE.exists():
@@ -84,6 +85,10 @@ async def load_state():
             LINKS.update(data.get("links", {}))
             SUBS.update(data.get("subs", {}))
             NODES.update(data.get("nodes", {}))
+            if data.get("node_api"):
+                NODE_API.update(data["node_api"])
+            if data.get("master"):
+                MASTER.update(data["master"])
             if "password_hash" in data:
                 AUTH["password_hash"] = data["password_hash"]
             logger.info(f"State loaded: {len(LINKS)} links, {len(SUBS)} subs")
@@ -98,6 +103,8 @@ async def save_state():
                 "links": dict(LINKS),
                 "subs": dict(SUBS),
                 "nodes": dict(NODES),
+                "node_api": dict(NODE_API),
+                "master": dict(MASTER),
                 "password_hash": AUTH["password_hash"],
                 "saved_at": datetime.now().isoformat(),
             }
@@ -126,6 +133,11 @@ SUBS: dict = {}
 SUBS_LOCK = asyncio.Lock()
 NODES: dict = {}
 NODES_LOCK = asyncio.Lock()
+NODE_API: dict = {}
+NODE_API_LOCK = asyncio.Lock()
+MASTER: dict = {}
+MASTER_LOCK = asyncio.Lock()
+_heartbeat_task: asyncio.Task | None = None
 
 # پروتکل‌های پشتیبانی‌شده برای هر کانفیگ
 PROTOCOLS = ("vless-ws", "xhttp-packet-up", "xhttp-stream-up", "xhttp-stream-one")
@@ -198,13 +210,105 @@ async def require_auth(request: Request):
         raise HTTPException(status_code=401, detail="unauthorized")
     return token
 
+
+async def require_auth_or_node(request: Request):
+    """Dashboard session or this node's API token — used so a peer RVG can register us."""
+    token = request.cookies.get(SESSION_COOKIE)
+    if await is_valid_session(token):
+        return token
+    api_token = current_node_api_token()
+    supplied = extract_bearer_token(
+        request.headers.get("authorization", ""),
+        request.headers.get("x-api-token") or request.headers.get("x-node-token") or "",
+    )
+    if api_token and supplied and secrets.compare_digest(supplied, api_token):
+        return supplied
+    raise HTTPException(status_code=401, detail="unauthorized")
+
+def env_node_api_token() -> str:
+    return os.environ.get("NODE_API_TOKEN", "").strip()
+
+
+def current_node_api_token() -> str:
+    """Env token wins so Railway/ops can pin it; otherwise the persisted one."""
+    return env_node_api_token() or str(NODE_API.get("token") or "")
+
+
+def new_node_api_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+async def ensure_node_api_token() -> str:
+    token = current_node_api_token()
+    if token:
+        return token
+    async with NODE_API_LOCK:
+        token = current_node_api_token()
+        if token:
+            return token
+        token = new_node_api_token()
+        NODE_API["token"] = token
+        NODE_API["created_at"] = datetime.now().isoformat()
+        NODE_API["source"] = "generated"
+    await save_state()
+    log_activity("api", "توکن API نود ساخته شد", "ok")
+    return token
+
+
+def public_node_api(request: Request | None = None, reveal: bool = False) -> dict:
+    token = current_node_api_token()
+    host = get_host(request)
+    scheme = "https" if host not in {"localhost", "127.0.0.1"} else "http"
+    base = f"{scheme}://{host}/api/node/v1"
+    return {
+        "role": "node",
+        "version": VERSION,
+        "enabled": bool(token),
+        "token_from_env": bool(env_node_api_token()),
+        "has_token": bool(token),
+        "token": token if reveal else None,
+        "token_preview": (token[:4] + "…" + token[-4:]) if token and len(token) > 8 else ("••••" if token else ""),
+        "created_at": NODE_API.get("created_at"),
+        "base_url": f"{scheme}://{host}",
+        "api_base": base,
+        "endpoints": {
+            "info": f"{base}/info",
+            "health": f"{base}/health",
+            "overview": f"{base}/overview",
+            "stats": f"{base}/stats",
+            "connections": f"{base}/connections",
+            "configs": f"{base}/configs",
+            "subscription": f"{base}/subscription",
+            "subs": f"{base}/subs",
+        },
+    }
+
+
+def public_master() -> dict:
+    return {
+        "connected": bool(MASTER.get("enabled") and MASTER.get("url")),
+        "url": MASTER.get("url") or "",
+        "name": MASTER.get("name") or "",
+        "panel_type": MASTER.get("panel_type") or "rvg",
+        "auth_type": MASTER.get("auth_type") or "credentials",
+        "verify_ssl": bool(MASTER.get("verify_ssl", True)),
+        "has_token": bool(MASTER.get("token")),
+        "has_password": bool(MASTER.get("password")),
+        "last_check": MASTER.get("last_check"),
+        "last_ok": MASTER.get("last_ok"),
+        "last_error": MASTER.get("last_error"),
+        "registered": bool(MASTER.get("registered")),
+    }
+
+
 async def require_node_api(request: Request):
-    """Authenticate another RVG panel without exposing the dashboard session."""
-    expected = os.environ.get("NODE_API_TOKEN", "").strip()
-    supplied = request.headers.get("authorization", "")
-    if supplied.lower().startswith("bearer "):
-        supplied = supplied[7:].strip()
-    if not expected or not secrets.compare_digest(supplied, expected):
+    """Authenticate the master panel without exposing the dashboard session."""
+    expected = current_node_api_token()
+    supplied = extract_bearer_token(
+        request.headers.get("authorization", ""),
+        request.headers.get("x-api-token") or request.headers.get("x-node-token") or "",
+    )
+    if not expected or not supplied or not secrets.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="invalid node API token")
     return supplied
 
@@ -218,12 +322,23 @@ async def startup():
         limits=limits, timeout=timeout, follow_redirects=True,
     )
     await load_state()
+    await ensure_node_api_token()
     await _tg_start_bot()
+    global _heartbeat_task
+    _heartbeat_task = asyncio.create_task(_master_heartbeat_loop())
     log_activity("system", "سرور راه‌اندازی شد", "ok")
-    logger.info(f"{BRAND} v9.6 started on port {CONFIG['port']}")
+    logger.info(f"{BRAND} v{VERSION} started on port {CONFIG['port']} (node mode)")
 
 @app.on_event("shutdown")
 async def shutdown():
+    global _heartbeat_task
+    if _heartbeat_task:
+        _heartbeat_task.cancel()
+        try:
+            await _heartbeat_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _heartbeat_task = None
     await save_state()
     await _tg_stop_bot()
     if http_client:
@@ -427,7 +542,7 @@ async def ensure_default_link():
 # ── Basic endpoints ───────────────────────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {"service": BRAND, "version": "9.6", "status": "active", "channel": "https://t.me/Farajian2004f"}
+    return {"service": BRAND, "version": VERSION, "role": "node", "status": "active", "channel": "https://t.me/Farajian2004f"}
 
 @app.get("/health")
 async def health():
@@ -1044,7 +1159,7 @@ def node_http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=502, detail="خطای غیرمنتظره در ارتباط با نود")
 
 @app.get("/api/nodes")
-async def list_nodes(_=Depends(require_auth)):
+async def list_nodes(_=Depends(require_auth_or_node)):
     async with NODES_LOCK:
         nodes = [public_node(node_id, node) for node_id, node in NODES.items()]
     nodes.sort(key=lambda n: n.get("created_at", ""), reverse=True)
@@ -1205,35 +1320,309 @@ async def nodes_subscription(_=Depends(require_auth)):
     content = base64.b64encode("\n".join(links).encode()).decode()
     return Response(content=content, media_type="text/plain", headers={"X-RVG-Node-Errors": str(len(errors))})
 
-# API exposed by an RVG child panel. Set NODE_API_TOKEN on that deployment.
+# ══════════════════════════════════════════════════════════════════════════════
+# This RVG is a NODE. The master panel talks to /api/node/v1 with Bearer token.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def serialize_node_config(uid: str, link: dict, host: str) -> dict:
+    return {
+        "id": uid,
+        "uuid": uid,
+        "label": link.get("label"),
+        "active": is_link_allowed(link),
+        "enabled": bool(link.get("active", True)),
+        "expired": is_link_expired(link),
+        "protocol": link.get("protocol", DEFAULT_PROTOCOL),
+        "fingerprint": link.get("fingerprint", DEFAULT_FINGERPRINT),
+        "alpn": link.get("alpn") or "",
+        "port": link.get("port", DEFAULT_PORT),
+        "limit_bytes": link.get("limit_bytes", 0),
+        "used_bytes": link.get("used_bytes", 0),
+        "speed_limit_bytes": link.get("speed_limit_bytes", 0),
+        "ip_limit": link.get("ip_limit", 0),
+        "expires_at": link.get("expires_at"),
+        "note": link.get("note") or "",
+        "created_at": link.get("created_at"),
+        "is_default": bool(link.get("is_default")),
+        "vless_link": vless_link_for_link(link, uid, host),
+        "subscription_url": f"https://{host}/sub/{uid}",
+        "connected_ips": len(unique_ips_for_uuid(uid)),
+    }
+
+
+def node_overview_payload() -> dict:
+    snap = dict(LINKS)
+    return {
+        "service": BRAND,
+        "role": "node",
+        "version": VERSION,
+        "links_count": len(snap),
+        "active_links": sum(1 for item in snap.values() if is_link_allowed(item)),
+        "expired_links": sum(1 for item in snap.values() if is_link_expired(item)),
+        "active_connections": len(connections),
+        "total_bytes": stats["total_bytes"],
+        "total_requests": stats["total_requests"],
+        "total_errors": stats["total_errors"],
+        "uptime": uptime(),
+        "host": CONFIG.get("host"),
+    }
+
+
+async def node_create_from_body(body: dict, request: Request) -> dict:
+    if "limit_bytes" in body:
+        limit_bytes = max(0, int(body.get("limit_bytes") or 0))
+    else:
+        lv = float(body.get("limit_value") or 0)
+        limit_bytes = 0 if lv <= 0 else parse_size_to_bytes(lv, body.get("limit_unit") or "GB")
+    expires_at = body.get("expires_at")
+    if not expires_at:
+        exp_days = int(body.get("expires_days") or 0)
+        expires_at = (datetime.now() + timedelta(days=exp_days)).isoformat() if exp_days > 0 else None
+    if "speed_limit_bytes" in body:
+        speed_limit_bytes = max(0, int(body.get("speed_limit_bytes") or 0))
+    else:
+        sv = float(body.get("speed_limit_value") or 0)
+        speed_limit_bytes = 0 if sv <= 0 else parse_speed_to_bytes(sv, body.get("speed_limit_unit") or "MBIT")
+    uid, link = await make_link(
+        label=body.get("label") or "لینک نود",
+        limit_bytes=limit_bytes,
+        expires_at=expires_at,
+        note=body.get("note") or "",
+        protocol=body.get("protocol") or DEFAULT_PROTOCOL,
+        fingerprint=body.get("fingerprint") or DEFAULT_FINGERPRINT,
+        alpn=body.get("alpn") or "",
+        port=int(body.get("port", DEFAULT_PORT) or DEFAULT_PORT),
+        ip_limit=max(0, int(body.get("ip_limit", 0) or 0)),
+        speed_limit_bytes=speed_limit_bytes,
+    )
+    return serialize_node_config(uid, link, get_host(request))
+
+
+@app.get("/api/master")
+async def get_master_settings(request: Request, _=Depends(require_auth)):
+    await ensure_node_api_token()
+    return {"api": public_node_api(request, reveal=False), "master": public_master()}
+
+
+@app.get("/api/master/token")
+async def reveal_node_token(request: Request, _=Depends(require_auth)):
+    await ensure_node_api_token()
+    return {"api": public_node_api(request, reveal=True)}
+
+
+@app.post("/api/master/token/rotate")
+async def rotate_node_token(request: Request, _=Depends(require_auth)):
+    if env_node_api_token():
+        raise HTTPException(status_code=400, detail="توکن از متغیر محیطی NODE_API_TOKEN می‌آید و از پنل قابل چرخش نیست")
+    async with NODE_API_LOCK:
+        NODE_API["token"] = new_node_api_token()
+        NODE_API["created_at"] = datetime.now().isoformat()
+        NODE_API["source"] = "rotated"
+    await save_state()
+    log_activity("api", "توکن API نود چرخانده شد", "warn")
+    return {"ok": True, "api": public_node_api(request, reveal=True)}
+
+
+@app.post("/api/master")
+async def connect_to_master(request: Request, _=Depends(require_auth)):
+    """Save master URL/token and optionally register this node on an RVG master."""
+    body = await request.json()
+    try:
+        url = normalize_base_url(str(body.get("url") or body.get("base_url") or ""))
+    except NodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    panel_type = str(body.get("panel_type") or "rvg").lower()
+    if panel_type not in {"rvg", "generic"}:
+        raise HTTPException(status_code=400, detail="نوع پنل مستر نامعتبر است")
+    auth_type = str(body.get("auth_type") or "credentials").lower()
+    if auth_type not in {"token", "credentials"}:
+        raise HTTPException(status_code=400, detail="روش ورود مستر نامعتبر است")
+    token = current_node_api_token() or await ensure_node_api_token()
+    host = get_host(request)
+    scheme = "https" if host not in {"localhost", "127.0.0.1"} else "http"
+    node_public = f"{scheme}://{host}"
+    snapshot = {
+        "url": url,
+        "name": str(body.get("name") or url)[:80],
+        "panel_type": panel_type,
+        "auth_type": auth_type,
+        "token": str(body.get("token") or MASTER.get("token") or "").strip(),
+        "username": str(body.get("username") or MASTER.get("username") or "").strip(),
+        "password": str(body.get("password") if body.get("password") not in (None, "") else MASTER.get("password") or ""),
+        "verify_ssl": bool(body.get("verify_ssl", True)),
+        "heartbeat_path": str(body.get("heartbeat_path") or "").strip(),
+        "health_path": str(body.get("health_path") or "").strip(),
+        "enabled": True,
+        "registered": False,
+        "last_error": None,
+        "last_ok": None,
+        "last_check": datetime.now().isoformat(),
+    }
+    if auth_type == "token" and panel_type == "rvg" and not snapshot["token"]:
+        raise HTTPException(status_code=400, detail="توکن پنل مستر الزامی است")
+    if auth_type == "credentials" and panel_type == "rvg" and not snapshot["password"]:
+        raise HTTPException(status_code=400, detail="رمز پنل مستر الزامی است")
+    try:
+        async with MasterClient(snapshot) as remote:
+            ping = await remote.ping()
+            if bool(body.get("register", True)) and panel_type == "rvg":
+                result = await remote.register(node_public, token, snapshot["name"] or f"{BRAND}-{host}")
+                snapshot["registered"] = bool(result.get("registered"))
+            else:
+                result = {"registered": False, "ping": ping}
+    except Exception as exc:
+        snapshot["last_error"] = str(exc)
+        async with MASTER_LOCK:
+            MASTER.clear()
+            MASTER.update(snapshot)
+            MASTER["enabled"] = False
+        await save_state()
+        raise node_http_error(exc)
+    snapshot["last_ok"] = datetime.now().isoformat()
+    async with MASTER_LOCK:
+        MASTER.clear()
+        MASTER.update(snapshot)
+    await save_state()
+    log_activity("master", f"به پنل مستر «{snapshot['name']}» متصل شد", "ok")
+    return {"ok": True, "master": public_master(), "result": result}
+
+
+@app.post("/api/master/test")
+async def test_master(_=Depends(require_auth)):
+    async with MASTER_LOCK:
+        snapshot = dict(MASTER)
+    if not snapshot.get("url"):
+        raise HTTPException(status_code=400, detail="هنوز به پنل مستر وصل نشده‌اید")
+    try:
+        async with MasterClient(snapshot) as remote:
+            ping = await remote.ping()
+    except Exception as exc:
+        async with MASTER_LOCK:
+            if MASTER:
+                MASTER["last_check"] = datetime.now().isoformat()
+                MASTER["last_error"] = str(exc)
+        asyncio.create_task(save_state())
+        raise node_http_error(exc)
+    async with MASTER_LOCK:
+        if MASTER:
+            MASTER["last_check"] = datetime.now().isoformat()
+            MASTER["last_ok"] = datetime.now().isoformat()
+            MASTER["last_error"] = None
+    asyncio.create_task(save_state())
+    return {"ok": True, "ping": ping, "master": public_master()}
+
+
+@app.delete("/api/master")
+async def disconnect_master(_=Depends(require_auth)):
+    async with MASTER_LOCK:
+        name = MASTER.get("name") or MASTER.get("url") or "مستر"
+        MASTER.clear()
+    await save_state()
+    log_activity("master", f"اتصال به پنل مستر «{name}» قطع شد", "warn")
+    return {"ok": True, "master": public_master()}
+
+
+async def _master_heartbeat_loop():
+    while True:
+        await asyncio.sleep(60)
+        try:
+            async with MASTER_LOCK:
+                snapshot = dict(MASTER)
+            if not snapshot.get("enabled") or not snapshot.get("url"):
+                continue
+            payload = {**node_overview_payload(), "api_base": f"https://{CONFIG.get('host', 'localhost')}/api/node/v1"}
+            async with MasterClient(snapshot) as remote:
+                await remote.heartbeat(payload)
+            async with MASTER_LOCK:
+                if MASTER.get("url") == snapshot.get("url"):
+                    MASTER["last_check"] = datetime.now().isoformat()
+                    MASTER["last_ok"] = datetime.now().isoformat()
+                    MASTER["last_error"] = None
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            async with MASTER_LOCK:
+                if MASTER:
+                    MASTER["last_check"] = datetime.now().isoformat()
+                    MASTER["last_error"] = str(exc)
+            logger.warning(f"Master heartbeat failed: {exc}")
+
+
+@app.post("/api/rvg-node/heartbeat")
+async def receive_node_heartbeat(request: Request, _=Depends(require_auth_or_node)):
+    """Accept heartbeats from a child RVG node when this instance is used as master."""
+    body = await request.json()
+    log_activity("node", f"Heartbeat از نود {body.get('host') or body.get('api_base') or 'نامشخص'}", "info")
+    return {"ok": True, "received_at": datetime.now().isoformat()}
+
+
+@app.get("/api/node/v1")
+@app.get("/api/node/v1/info")
+async def node_api_info(request: Request, _=Depends(require_node_api)):
+    info = public_node_api(request, reveal=False)
+    info.pop("token", None)
+    return {**info, **node_overview_payload()}
+
+
+@app.get("/api/node/v1/health")
+async def node_api_health(_=Depends(require_node_api)):
+    return {"status": "ok", "role": "node", "version": VERSION, "connections": len(connections), "uptime": uptime()}
+
+
 @app.get("/api/node/v1/overview")
 async def node_api_overview(_=Depends(require_node_api)):
     async with LINKS_LOCK:
+        return node_overview_payload()
+
+
+@app.get("/api/node/v1/stats")
+async def node_api_stats(_=Depends(require_node_api)):
+    async with LINKS_LOCK:
+        overview = node_overview_payload()
+    return {**overview, "hourly": dict(hourly_traffic), "recent_errors": list(error_logs)[-10:]}
+
+
+@app.get("/api/node/v1/connections")
+async def node_api_connections(_=Depends(require_node_api)):
+    async with LINKS_LOCK:
         snap = dict(LINKS)
-    return {"version": "9.6", "links_count": len(snap),
-            "active_links": sum(1 for item in snap.values() if is_link_allowed(item)),
-            "active_connections": len(connections), "total_bytes": stats["total_bytes"], "uptime": uptime()}
+    items = []
+    for conn_id, c in connections.items():
+        link = snap.get(c.get("uuid"))
+        items.append({
+            "id": conn_id,
+            "uuid": c.get("uuid"),
+            "ip": c.get("ip"),
+            "label": link.get("label") if link else None,
+            "bytes": c.get("bytes", 0),
+            "transport": c.get("transport", "vless-ws"),
+            "connected_at": c.get("connected_at"),
+        })
+    return {"connections": items, "count": len(items)}
+
 
 @app.get("/api/node/v1/configs")
 async def node_api_configs(request: Request, _=Depends(require_node_api)):
     host = get_host(request)
     async with LINKS_LOCK:
         snap = dict(LINKS)
-    return {"configs": [{"uuid": uid, "id": uid, **item,
-                         "vless_link": vless_link_for_link(item, uid, host)} for uid, item in snap.items()]}
+    return {"configs": [serialize_node_config(uid, item, host) for uid, item in snap.items()]}
+
+
+@app.get("/api/node/v1/configs/{uid}")
+async def node_api_get_config(uid: str, request: Request, _=Depends(require_node_api)):
+    async with LINKS_LOCK:
+        link = LINKS.get(uid)
+    if not link:
+        raise HTTPException(status_code=404, detail="config not found")
+    return serialize_node_config(uid, link, get_host(request))
+
 
 @app.post("/api/node/v1/configs")
 async def node_api_create_config(request: Request, _=Depends(require_node_api)):
     body = await request.json()
-    uid, link = await make_link(label=body.get("label") or "لینک نود",
-                                limit_bytes=max(0, int(body.get("limit_bytes", 0) or 0)),
-                                expires_at=body.get("expires_at"), note=body.get("note") or "",
-                                protocol=body.get("protocol") or DEFAULT_PROTOCOL,
-                                fingerprint=body.get("fingerprint") or DEFAULT_FINGERPRINT,
-                                alpn=body.get("alpn") or "", port=int(body.get("port", DEFAULT_PORT) or DEFAULT_PORT),
-                                ip_limit=max(0, int(body.get("ip_limit", 0) or 0)),
-                                speed_limit_bytes=max(0, int(body.get("speed_limit_bytes", 0) or 0)))
-    return {"uuid": uid, **link, "vless_link": vless_link_for_link(link, uid, get_host(request))}
+    return await node_create_from_body(body, request)
+
 
 @app.patch("/api/node/v1/configs/{uid}")
 async def node_api_update_config(uid: str, request: Request, _=Depends(require_node_api)):
@@ -1242,17 +1631,89 @@ async def node_api_update_config(uid: str, request: Request, _=Depends(require_n
         if uid not in LINKS:
             raise HTTPException(status_code=404, detail="config not found")
         link = LINKS[uid]
-        for field in ("label", "note", "active", "expires_at", "limit_bytes", "speed_limit_bytes", "ip_limit"):
-            if field in body:
-                link[field] = body[field]
+        if "active" in body:
+            link["active"] = bool(body["active"])
+        if "label" in body:
+            link["label"] = str(body["label"])[:60]
+        if "note" in body:
+            link["note"] = str(body["note"])[:200]
+        if body.get("reset_usage"):
+            link["used_bytes"] = 0
+        if "limit_bytes" in body:
+            link["limit_bytes"] = max(0, int(body.get("limit_bytes") or 0))
+        elif "limit_value" in body:
+            lv = float(body.get("limit_value") or 0)
+            link["limit_bytes"] = 0 if lv <= 0 else parse_size_to_bytes(lv, body.get("limit_unit") or "GB")
+        if "expires_at" in body:
+            link["expires_at"] = body.get("expires_at")
+        elif "expires_days" in body:
+            ed = int(body.get("expires_days") or 0)
+            link["expires_at"] = (datetime.now() + timedelta(days=ed)).isoformat() if ed > 0 else None
+        if "fingerprint" in body:
+            fp = str(body.get("fingerprint") or DEFAULT_FINGERPRINT).strip().lower()
+            link["fingerprint"] = fp if fp in FINGERPRINTS else DEFAULT_FINGERPRINT
+        if "alpn" in body:
+            link["alpn"] = str(body.get("alpn") or "").strip()[:100]
+        if "port" in body:
+            try:
+                p = int(body.get("port") or DEFAULT_PORT)
+            except (TypeError, ValueError):
+                p = DEFAULT_PORT
+            link["port"] = p if (MIN_PORT <= p <= MAX_PORT) else DEFAULT_PORT
+        if "ip_limit" in body:
+            link["ip_limit"] = max(0, int(body.get("ip_limit") or 0))
+        if "speed_limit_bytes" in body:
+            link["speed_limit_bytes"] = max(0, int(body.get("speed_limit_bytes") or 0))
+        elif "speed_limit_value" in body:
+            sv = float(body.get("speed_limit_value") or 0)
+            link["speed_limit_bytes"] = 0 if sv <= 0 else parse_speed_to_bytes(sv, body.get("speed_limit_unit") or "MBIT")
+        if "protocol" in body and body["protocol"] in PROTOCOLS:
+            link["protocol"] = body["protocol"]
     asyncio.create_task(save_state())
-    return {"ok": True}
+    async with LINKS_LOCK:
+        updated = dict(LINKS.get(uid) or {})
+    return {"ok": True, "config": serialize_node_config(uid, updated, get_host(request)) if updated else None}
+
 
 @app.delete("/api/node/v1/configs/{uid}")
 async def node_api_delete_config(uid: str, _=Depends(require_node_api)):
     if await remove_link(uid) is None:
         raise HTTPException(status_code=404, detail="config not found")
     return {"ok": True}
+
+
+@app.get("/api/node/v1/subscription")
+async def node_api_subscription(request: Request, _=Depends(require_node_api)):
+    import base64
+    host = get_host(request)
+    async with LINKS_LOCK:
+        lines = [vless_link_for_link(d, uid, host) for uid, d in LINKS.items() if is_link_allowed(d)]
+    content = base64.b64encode("\n".join(lines).encode()).decode()
+    return Response(content=content, media_type="text/plain",
+                    headers={"profile-title": quote(BRAND), "support-url": "https://t.me/Farajian2004f"})
+
+
+@app.get("/api/node/v1/subs")
+async def node_api_subs(request: Request, _=Depends(require_node_api)):
+    host = get_host(request)
+    async with SUBS_LOCK:
+        snap_subs = dict(SUBS)
+    async with LINKS_LOCK:
+        snap_links = dict(LINKS)
+    result = []
+    for sid, s in snap_subs.items():
+        link_ids = s.get("link_ids", [])
+        result.append({
+            "sub_id": sid,
+            "name": s.get("name"),
+            "desc": s.get("desc", ""),
+            "has_password": s.get("password_hash") is not None,
+            "links_count": len(link_ids),
+            "active_count": sum(1 for lid in link_ids if is_link_allowed(snap_links.get(lid))),
+            "public_url": f"https://{host}/p/{s['uuid_key']}",
+            "sub_url": f"https://{host}/sub-group/{s['uuid_key']}",
+        })
+    return {"subs": result}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # VLESS Relay — جدا شده به relay_vless.py (دست نخورده)

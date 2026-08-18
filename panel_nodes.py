@@ -1,8 +1,11 @@
-"""Remote panel adapters used by RVG's central node manager.
+"""Remote panel adapters and the outbound master client.
 
-The adapters intentionally return a small, normalized model while still accepting
-native panel payloads for create/update operations. This keeps RVG compatible
-with panel versions that add fields without requiring a release here first.
+RVG itself is a node. The master panel (another RVG or a custom panel)
+calls this node's `/api/node/v1` API. When the admin enters a master URL
+here, `MasterClient` registers this node on that master and sends heartbeats.
+
+`PanelNodeClient` stays so a *different* RVG instance that is used as the
+master can still talk to this node (and to Marzban / 3x-ui).
 """
 from __future__ import annotations
 
@@ -26,6 +29,14 @@ def normalize_base_url(value: str) -> str:
     if parsed.username or parsed.password:
         raise NodeError("نام کاربری و رمز را داخل URL قرار ندهید")
     return value
+
+
+def extract_bearer_token(authorization: str = "", extra: str = "") -> str:
+    """Pull a token from Authorization: Bearer … or a dedicated header."""
+    supplied = (authorization or "").strip()
+    if supplied.lower().startswith("bearer "):
+        supplied = supplied[7:].strip()
+    return supplied or (extra or "").strip()
 
 
 def _message(response: httpx.Response) -> str:
@@ -200,3 +211,90 @@ class PanelNodeClient:
         else:
             path = f"/panel/api/inbounds/del/{config_id}"
         return (await self._request("DELETE" if self.kind != "xui" else "POST", path)).json()
+
+
+@dataclass
+class MasterClient:
+    """Outbound client used by this RVG node to talk to its master panel."""
+
+    master: dict[str, Any]
+    timeout: float = 15.0
+
+    def __post_init__(self) -> None:
+        self.kind = (self.master.get("panel_type") or "rvg").lower()
+        self.base_url = normalize_base_url(self.master.get("url") or self.master.get("base_url") or "")
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(self.timeout, connect=min(self.timeout, 8.0)),
+            follow_redirects=True,
+            verify=bool(self.master.get("verify_ssl", True)),
+            headers={"Accept": "application/json", "User-Agent": "RVG-Node/1.0"},
+        )
+
+    async def __aenter__(self) -> "MasterClient":
+        return self
+
+    async def __aexit__(self, *_: Any) -> None:
+        await self.client.aclose()
+
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        try:
+            response = await self.client.request(method, path, **kwargs)
+        except httpx.TimeoutException as exc:
+            raise NodeError("زمان اتصال به پنل مستر تمام شد") from exc
+        except httpx.HTTPError as exc:
+            raise NodeError(f"اتصال به پنل مستر برقرار نشد: {exc}") from exc
+        if response.status_code >= 400:
+            raise NodeError(f"خطای مستر ({response.status_code}): {_message(response)}")
+        return response
+
+    async def ping(self) -> dict[str, Any]:
+        """Reachability check that works for RVG and generic masters."""
+        if self.kind == "rvg":
+            data = (await self._request("GET", "/health")).json()
+            return {"online": True, "kind": "rvg", "status": data.get("status", "ok"), "uptime": data.get("uptime")}
+        path = self.master.get("health_path") or "/health"
+        response = await self._request("GET", path)
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text[:200]}
+        return {"online": True, "kind": self.kind, "status": "ok", "body": body}
+
+    async def login_rvg(self) -> None:
+        password = self.master.get("password") or ""
+        if not password:
+            raise NodeError("رمز پنل مستر وارد نشده است")
+        await self._request("POST", "/api/login", json={"password": password})
+
+    async def register(self, node_public_url: str, node_token: str, node_name: str) -> dict[str, Any]:
+        """Register this node on an RVG master so the master can pull the API."""
+        if self.kind != "rvg":
+            ping = await self.ping()
+            return {"registered": False, "ping": ping, "note": "پنل عمومی فقط پینگ می‌شود"}
+        auth_type = self.master.get("auth_type", "credentials")
+        if auth_type == "token" and self.master.get("token"):
+            self.client.headers["Authorization"] = f"Bearer {self.master['token']}"
+        else:
+            await self.login_rvg()
+        payload = {
+            "name": node_name[:80],
+            "base_url": normalize_base_url(node_public_url),
+            "panel_type": "rvg",
+            "auth_type": "token",
+            "token": node_token,
+            "verify_ssl": bool(self.master.get("verify_ssl", True)),
+            "enabled": True,
+        }
+        data = (await self._request("POST", "/api/nodes", json=payload)).json()
+        return {"registered": True, "node": data.get("node", data)}
+
+    async def heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Tell the master this node is alive. Falls back to a health ping."""
+        path = self.master.get("heartbeat_path") or "/api/rvg-node/heartbeat"
+        try:
+            data = (await self._request("POST", path, json=payload)).json()
+            return {"ok": True, "via": "heartbeat", "response": data}
+        except NodeError:
+            ping = await self.ping()
+            return {"ok": True, "via": "ping", "response": ping}
